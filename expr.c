@@ -2,11 +2,15 @@
 
 
 const char operators[] = "+-/*^";
+
 const char prio0[] = "+-";
 const char prio1[] = "/*";
 const char prio2[] = "^";
+
 const char separators_open[] = "(";
 const char separators_close[] = ")";
+
+const char separator_deci[] = ".,";
 
 
 void init_graph_m(graph_m_t *g, int nb_node_max){
@@ -99,8 +103,10 @@ int read_expr(expression_t *expr, char *expr_src){
     token_types token_type;
     token_types last_token_type;
     
-    long token_l;
-    char *token_end;
+    //long token_l;
+    rational_t elem_r;
+    //char *token_end;
+    char *elem_end;
     
     int current_ops_nodes[100]; //pile des opérateurs pouvant etre affectés par la prio des opérations
     int cur_ops_nos_ind = 0; // indique le dessus de la pile
@@ -134,7 +140,8 @@ int read_expr(expression_t *expr, char *expr_src){
     while((c = expr_src[0]) != '\0'){
         printf("----------------\n\n");
         
-        token_l = strtol(expr_src, &token_end, 10); // déplacer ça dans la condition qui traite les opérandes num
+        //token_l = strtol(expr_src, &token_end, 10);
+        elem_r = read_r(expr_src, &elem_end, separator_deci);
         
         if(strchr(operators, c)){
             
@@ -185,7 +192,7 @@ int read_expr(expression_t *expr, char *expr_src){
             token_type = SUB_EXPR;
             
             
-            int sub_expr_len = (strrchr(expr_src+1, ')') - (expr_src+1)); // +1 car une expression ne peut pas commencer par une parenthèse fermante
+            int sub_expr_len = (strrchr(expr_src+1, ')') - (expr_src+1)); // +1 car expr_src est une parenthèse
             char* sub_expr_src = malloc(sizeof(char)*(sub_expr_len+1));// +1 pr le \0
 
             strncpy(sub_expr_src, expr_src+1, sub_expr_len);
@@ -200,25 +207,21 @@ int read_expr(expression_t *expr, char *expr_src){
             last_token_type = SEPARATOR_COLSE;
             
             
-        }else if(expr_src != token_end){
+        }else if(expr_src != elem_end){
             token_type = OPERAND_NUM;
             
-            expr_src = token_end;
-            printf("num %ld\n", token_l);
+            expr_src = elem_end;
+            print_rational(elem_r);
             
             if(last_token_type == OPERAND_NUM){
                 printf("db num\n");
                 err = 1;
                 break;
             }
-            rational_t r;
-            r.nume = token_l;
-            r.deno = 1;
             
-            token_t t = {token_type, 0, r};
+            token_t t = {token_type, 0, elem_r};
             
             last_opd_node = add_elem(expr, t);
-            
         
         }else{
             err = 1;
@@ -256,14 +259,6 @@ int read_expr(expression_t *expr, char *expr_src){
     printf("################ fin read #################\n");
     
     return root;
-}
-
-void print_rational(rational_t r){
-    if(r.deno == 1){
-        printf("%ld", r.nume);               
-    }else{
-        printf("%ld/%ld", r.nume, r.deno);
-    }
 }
 
 void print_token(token_t t){

@@ -36,6 +36,7 @@ extern const char prio2[];
 extern const char separators_open[];
 extern const char separators_close[];
 
+extern const char separator_deci[];
 
 void init_graph_m(graph_m_t *g, int nb_node_max);
 void free_graph_m(graph_m_t *g, int nb_node_max);
@@ -48,7 +49,6 @@ char is_leaf(graph_m_t *g, int node);
 int operator_greater(char op1, char op2);
 int read_expr(expression_t *expr, char *expr_src);
 
-void print_rational(rational_t r);
 void print_token(token_t t);
 void print_expr(expression_t *e);
 rational_t calc_graph(expression_t *expr, int root);
