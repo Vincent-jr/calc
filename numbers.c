@@ -52,12 +52,10 @@ rational_t pow_r(rational_t n, long int e){ // faire le meilleur algo qui fait c
 
 rational_t read_r(const char *str, char **end, const char *sep){ // sep les separateurs entre partie entière et parties décimale, sous form de string
     rational_t r_out;
-    long int integ;
-    long int decimals;
+    long int integ, decimals;
     
     integ = strtol(str, end, 10);
-    
-    if(strchr(sep, *end[0])){ // si partie entière est suivis d'un séparateur valide (partie entière peut etre la chaine vide)
+    if(**end != 0 && strchr(sep, **end)){ // si partie entière est suivis d'un séparateur valide (partie entière peut etre la chaine vide)
         char* decimals_start = *end + 1;
         decimals = strtol(decimals_start, end, 10);
 
@@ -74,6 +72,9 @@ rational_t read_r(const char *str, char **end, const char *sep){ // sep les sepa
             r_out.nume = integ;
             r_out.deno = 1;
         }
+    }else{
+        r_out.nume = integ;
+        r_out.deno = 1;
     }
     
     return r_out;

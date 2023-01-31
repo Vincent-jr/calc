@@ -13,68 +13,45 @@ const char separators_close[] = ")";
 const char separator_deci[] = ".,";
 
 
-void init_graph_m(graph_m_t *g, int nb_node_max){
-    g->nb_nodes = 0;
-//    g->nodes = calloc(nb_node_max, sizeof(int));
+arbin_t* new_node(token_t val){
+    arbin_t* n = malloc(sizeof(arbin_t));
+    n->val = val;
+    n->left = NULL;
+    n->right = NULL;
     
-    g->nb_edges = 0;
-    g->edges = malloc(sizeof(char*)*nb_node_max);
-    for(int i=0; i < nb_node_max; i++){
-        g->edges[i] = calloc(nb_node_max, sizeof(char));
-    }
+    return n;
 }
 
-void free_graph_m(graph_m_t *g, int nb_nodes_max){
-    //free(g->nodes);
-    for(int i=0; i<nb_nodes_max; i++){
-        free(g->edges[i]);
+void free_arb(arbin_t *arb){
+    if(arb->left != NULL){
+        free_arb(arb->left);
     }
-    free(g->edges);
-}
-
-void init_expression(expression_t *expr, int nb_nodes_max){
-    expr->elem = malloc(sizeof(token_t) * nb_nodes_max);
+    if(arb->right != NULL){
+        free_arb(arb->right);
+    }
     
-    expr->g = malloc(sizeof(graph_m_t));
-    init_graph_m(expr->g, nb_nodes_max);
+    free(arb);
 }
 
-void free_expression(expression_t *expr, int nb_nodes_max){
-    free_graph_m(expr->g, nb_nodes_max);
-    free(expr->elem);
+inline arbin_t* new_node_i(int i){
+    return new_node((token_t){OPERAND_NUM, 0, (rational_t){i, 1}});
+}
+
+inline arbin_t* new_node_op(char c){
+    return new_node((token_t){OPERATOR, c, (rational_t){0, 0}});
+}
+
+inline arbin_t* new_node_var(char c){
+    return new_node((token_t){OPERAND_C, c, (rational_t){0, 0}});
+}
+
+inline arbin_t* new_node_r(rational_t r){
+    return new_node((token_t){OPERAND_NUM, 0, r});
 }
 
 
-int add_node(graph_m_t *g){
-    //g->nodes[g->nb_nodes] = c;
-    return g->nb_nodes++;
-}
-
-void add_edge(graph_m_t *g, int n1, int n2){
-    if(n1 < g->nb_nodes && n1 >= 0 && n2 < g->nb_nodes && n2 >= 0){
-        g->edges[n1][n2] = 1;
-        g->nb_edges++;
-    }
-}
-
-int add_elem(expression_t *expr, token_t t){
-    int new_elem_ind = add_node(expr->g);
-    expr->elem[new_elem_ind] = t;
-    return new_elem_ind;
-}
-
-char is_leaf(graph_m_t *g, int node){
-    int nb_adj = 0;
-    for(int i=0; i<g->nb_nodes; i++){
-        if(g->edges[node][i]){
-            nb_adj++;
-        }
-    }
-    if(nb_adj > 1){
-        return 0;
-    }else{
-        return 1;
-    }
+bool is_leaf(arbin_t *a){
+    return a->right == NULL && a->left == NULL;
 }
 
 int operator_greater(char op1, char op2){
@@ -91,98 +68,116 @@ int operator_greater(char op1, char op2){
     }
 }
 
-int read_expr(expression_t *expr, char *expr_src){
+
+bool operator_smaller(char op1, char op2){ // retourne true si op1 est strictement + petit que op2
+    if(strchr(prio2, op1)){
+        return false;
+    }else if(strchr(prio1, op1)){
+        if(strchr(prio2, op2)){
+            return true;
+        }else{
+            return false;
+        }
+    }else{
+        if(strchr(prio0, op2)){
+            return false;
+        }else{
+            return true;
+        }
+    }
+}
+
+
+int add_operator(arbin_t **op_stack, int *top, arbin_t* new_node, arbin_t* pending){
+    
+    arbin_t* active_node = op_stack[*top];
+    
+    while(!operator_greater(new_node->val.c, active_node->val.c)){
+        printf("not greater\n");
+        if(active_node == op_stack[0]){ // root
+            printf("at root %d\n", *top);
+            new_node->left = op_stack[0];
+            op_stack[0]->right = pending;
+            op_stack[0] = new_node;
+            break;
+        }else{
+            active_node->right = pending;
+            pending = active_node;
+            
+            (*top)--; // attention a ne pas passer en négatif
+            active_node = op_stack[*top];
+        }
+    }
+    
+    if(op_stack[0] != new_node){
+        new_node->left = pending;
+        (*top)++;
+        op_stack[*top] = new_node;
+    }
+    
+    return 1;
+}
+
+
+arbin_t* read_expr(char *expr_src){
     printf("################## read_expr ####################\n");
-    char *expr_start = expr_src;
-    graph_m_t *g = expr->g;
     
-    int root; // racine de l'arbre syntaxique
+    arbin_t* root;
     
-    char err = 0; // boolen
+    bool err = false;
     
     token_types token_type;
     token_types last_token_type;
     
-    //long token_l;
     rational_t elem_r;
-    //char *token_end;
     char *elem_end;
+    arbin_t* pending;
+    arbin_t* new_node;
     
-    int current_ops_nodes[100]; //pile des opérateurs pouvant etre affectés par la prio des opérations
-    int cur_ops_nos_ind = 0; // indique le dessus de la pile
-    int prev_op_node; // num de sommet de l'operateur précédent
-    int new_opt_node; // num du nouveau sommet
     
-    int last_opd_node;
+    arbin_t* current_ops_nodes[100]; //pile des opérateurs pouvant etre affectés par la prio des opérations
+    int active_ind = -1; // indique le dessus de la pile
+    arbin_t* active_node;
     
-    add_elem(expr, (token_t){OPERAND_NUM, 0, (rational_t){0, 1}});
     
-    if(expr_src[0] == '-'){
-        //add_node(g, '-');
-        add_elem(expr, (token_t){OPERAND_C, '-', (rational_t){0, 0}});
-        expr_src++;
-    }else if(expr_src[0] == '+'){
-        //add_node(g, '+');
-        add_elem(expr, (token_t){OPERAND_C, '+', (rational_t){0, 0}});
+    
+    char first_char = expr_src[0];
+    if(first_char == '-' || first_char == '+'){
+        root = new_node_op(first_char);
         expr_src++;
     }else{
-        //add_node(g, '+');
-        add_elem(expr, (token_t){OPERAND_C, '+', (rational_t){0, 0}});
+        root = new_node_op('+');
     }
     
-    add_edge(g, g->nb_nodes-1, g->nb_nodes-2);
-    root = g->nb_nodes-1;
-    current_ops_nodes[cur_ops_nos_ind] = g->nb_nodes-1;
+    root->left = new_node_i(0);
+    
+    active_ind++;
+    current_ops_nodes[active_ind] = root;
+    pending = root;
+    
+    
     last_token_type = OPERATOR;
     
     
     char c;
-    while((c = expr_src[0]) != '\0'){
-        printf("----------------\n\n");
+    print_expr(root);
+    while((c = expr_src[0]) != '\0' && !err){
+        printf("--------%d--------\n\n", c);
         
-        //token_l = strtol(expr_src, &token_end, 10);
         elem_r = read_r(expr_src, &elem_end, separator_deci);
         
         if(strchr(operators, c)){
             
-            new_opt_node = add_elem(expr, (token_t){OPERAND_C, c, (rational_t){0, 0}});;
-            
-            if(last_token_type == OPERATOR){
-                err = 1;
+            if(last_token_type == OPERATOR){ // deux opérateurs de suite
+                err = true;
+                printf("db operateur\n");
                 break;
-                
-                
-            }else if(last_token_type == OPERAND_NUM || last_token_type == SUB_EXPR){ // ou operand c
-                printf("op %c %c %d\n", c, (char)expr->elem[current_ops_nodes[cur_ops_nos_ind]].c, operator_greater(c, current_ops_nodes[cur_ops_nos_ind]));
-                
-                if(operator_greater(c, expr->elem[current_ops_nodes[cur_ops_nos_ind]].c)){
-                    add_edge(g, new_opt_node, last_opd_node);
-                    
-                    cur_ops_nos_ind++;
-                    current_ops_nodes[cur_ops_nos_ind] = new_opt_node;
-                    
-                }else{
-                    printf("prio inf, %d, %d\n", cur_ops_nos_ind, g->nb_edges);
-                    prev_op_node = current_ops_nodes[cur_ops_nos_ind];
-                    
-                    add_edge(g, prev_op_node, last_opd_node);
-                    cur_ops_nos_ind--; // on dépile
-                    
-                    while(cur_ops_nos_ind >= 0 && !operator_greater(c, expr->elem[current_ops_nodes[cur_ops_nos_ind]].c)){
-                        add_edge(g, current_ops_nodes[cur_ops_nos_ind], prev_op_node);
-                        prev_op_node = current_ops_nodes[cur_ops_nos_ind];
-                        cur_ops_nos_ind--;
-                    }
-                    
-                    add_edge(g, new_opt_node, prev_op_node);
-                    
-                    if(cur_ops_nos_ind < 0){// on a "remonté" tous les opérateurs
-                        root = new_opt_node;
-                    }
-                    
-                    cur_ops_nos_ind++;
-                    current_ops_nodes[cur_ops_nos_ind] = new_opt_node;
-                }
+            }
+            
+            new_node = new_node_op(c);
+            
+            if(last_token_type == OPERAND_NUM || last_token_type == SUB_EXPR || last_token_type == OPERAND_C){
+                add_operator(current_ops_nodes, &active_ind, new_node, pending);
             }
             
             token_type = OPERATOR;
@@ -198,7 +193,7 @@ int read_expr(expression_t *expr, char *expr_src){
             strncpy(sub_expr_src, expr_src+1, sub_expr_len);
             sub_expr_src[sub_expr_len] = '\0';
             
-            last_opd_node = read_expr(expr, sub_expr_src);
+            pending = read_expr(sub_expr_src);
             free(sub_expr_src);
 
             expr_src += 2 + sub_expr_len;
@@ -206,26 +201,40 @@ int read_expr(expression_t *expr, char *expr_src){
         }else if(strchr(separators_close, c)){
             last_token_type = SEPARATOR_COLSE;
             
-            
         }else if(expr_src != elem_end){
             token_type = OPERAND_NUM;
             
             expr_src = elem_end;
+
+            printf("num : ");
             print_rational(elem_r);
+            printf("\n");
             
             if(last_token_type == OPERAND_NUM){
                 printf("db num\n");
-                err = 1;
-                break;
+                err = true;
             }
             
-            token_t t = {token_type, 0, elem_r};
+            pending = new_node_r(elem_r);
+        }else if(isspace(c)){
+            expr_src++;
+        }else if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')){ // inconnue
+            token_type = OPERAND_C;
+
+            printf("inconnu : \n");
             
-            last_opd_node = add_elem(expr, t);
-        
+            if(last_token_type == OPERAND_NUM || last_token_type == OPERAND_C){
+                printf("add *\n");
+                new_node = new_node_op('*');
+                add_operator(current_ops_nodes, &active_ind, new_node, pending);
+            }
+            
+            pending = new_node_var(c);
+            expr_src++;
+            
         }else{
-            err = 1;
-            break;
+            printf("unexpected\n");
+            err = true;
         }
         
         last_token_type = token_type;
@@ -233,32 +242,27 @@ int read_expr(expression_t *expr, char *expr_src){
     }
     
     
-    if((last_token_type == OPERAND_NUM || last_token_type == SUB_EXPR)&& cur_ops_nos_ind >= 0){ // ou operand c
-        prev_op_node = current_ops_nodes[cur_ops_nos_ind];
-        
-        add_edge(g,current_ops_nodes[cur_ops_nos_ind], last_opd_node);
-        cur_ops_nos_ind--;
-        
-        while(cur_ops_nos_ind >= 0 && !operator_greater('+', expr->elem[current_ops_nodes[cur_ops_nos_ind]].c)){
-            add_edge(g, current_ops_nodes[cur_ops_nos_ind], prev_op_node);
-            prev_op_node = current_ops_nodes[cur_ops_nos_ind];
-            cur_ops_nos_ind--;
-        }
-    }
     
     if(err){
-        int pos = expr_src - expr_start;
-        printf("Erreure de syntaxe au caractère %d:\n", pos+1);
-        printf("%s\n", expr_start);
-        for(int i=0; i < pos; i++){
-            printf(" ");
-        }
-        printf("^\n");
+        printf("erreur\n");
+        return NULL;
     }
     
+    if(pending != NULL){ // ou operand c
+        printf("still pending %d\n", active_ind);
+        active_node = current_ops_nodes[active_ind];
+        do{
+            active_node->right = pending;
+            pending = active_node;
+            active_ind--;
+            active_node = current_ops_nodes[active_ind];
+        }while(active_ind >= 0);
+    }
+    
+
     printf("################ fin read #################\n");
     
-    return root;
+    return current_ops_nodes[0]; // si pile vide erreure
 }
 
 void print_token(token_t t){
@@ -277,60 +281,88 @@ void print_token(token_t t){
     }
 }
 
-void print_expr(expression_t *e){
-    for(int i=0; i < e->g->nb_nodes; i++){
-        printf("%d (", i);
-        print_token(e->elem[i]);
-        printf(") : ");
-        for(int j=0; j < e->g->nb_nodes; j++){
-            if(e->g->edges[i][j]){
-                printf("%d, ", j);
-            }
-        }
-        printf("\n");
+
+int depth(arbin_t *a){
+    if(a == NULL){
+        return 0;
+    }else {
+        int dleft = depth(a->left);
+        int dright = depth(a->right);
+        return dright > dleft ? 1+dright : 1+dleft;
     }
 }
 
-rational_t calc_graph(expression_t *expr, int root){
+
+void print_expr_(arbin_t *a, int i){
+    if(a != NULL){
+        printf("%d (", i);
+        print_token(a->val);
+        int dleft = depth(a->left);
+        printf(") : ");
+        if(a->left != NULL){
+            printf("%d", i+1);
+        }else{
+            printf("%d", -1);
+        }
+        printf(", ");
+        if(a->right != NULL){
+            printf("%d", i+1+dleft*dleft);
+        }else{
+            printf("%d", -1);
+        }
+        printf("\n");
+        print_expr_(a->left, i+1);
+        print_expr_(a->right, i+1+dleft*dleft);
+    }
+}
+void print_expr(arbin_t *a){
+    int i = 0;
+    print_expr_(a, i);
+}
+
+
+
+rational_t calc_arb(arbin_t *arb){ // détecter un arbre invalide
     rational_t res;
     rational_t ops[2]; // potentiellement faire un tab de pointeur pr distinguer initialisé de pas initialisé dans le cas d'un operateur unaire
-    int nb_op = 0;
-    graph_m_t *g = expr->g;
     
-    for(int i=0; i < g->nb_nodes && nb_op < 2; i++){
-        if(g->edges[root][i]){
-            if(is_leaf(g, i)){
-                ops[nb_op] = expr->elem[i].r;
-            }else{
-                ops[nb_op] = calc_graph(expr, i);
+    token_types type = arb->val.type;
+    switch(type){
+        case OPERAND_NUM:
+            return arb->val.r;
+            break;
+        case OPERATOR:
+            ops[0] = calc_arb(arb->left);
+            ops[1] = calc_arb(arb->right);
+            
+            if(ops[0].deno == 0 || ops[1].deno == 0){
+                return (rational_t){0, 0};
             }
-            nb_op++;
-        }
-    }
-    
-    switch(expr->elem[root].c){ // tester si elem[root] est bien de type OPERATOR
-        case '*':
-            //res = ops[0] * ops[1];
-            res = mult_r(ops[0], ops[1]);
-            break;
-        case '/':
-            //res = ops[0] / ops[1];
-            res = div_r(ops[0], ops[1]);
-            break;
-        case '+':
-            //res = ops[0] + ops[1];
-            res = add_r(ops[0], ops[1]);
-            break;
-        case '-':
-            //res = ops[0] - ops[1];
-            res = add_r(ops[0], ops[1]);
-            break;
-        case '^':
-            //res = pow(ops[0], ops[1]);
-            res = pow_r(ops[0], ops[1].nume);
+            
+            switch(arb->val.c){
+                case '*':
+                    res = mult_r(ops[0], ops[1]);
+                    break;
+                case '/':
+                    res = div_r(ops[0], ops[1]);
+                    break;
+                case '+':
+                    res = add_r(ops[0], ops[1]);
+                    break;
+                case '-':
+                    res = sub_r(ops[0], ops[1]);
+                    break;
+                case '^':
+                    res = pow_r(ops[0], ops[1].nume);
+                    break;
+                default:
+                    break;
+            }
             break;
         default:
+            return (rational_t){0, 0};
             break;
     }
+
     return res;
 }
